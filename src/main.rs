@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::{traits::Producer, traits::Consumer, traits::Split, HeapRb};
+use ringbuf::{traits::{Producer, Consumer, Split, Observer}, HeapRb};
 
 fn main() -> Result<(), anyhow::Error> {
     let host = cpal::default_host();
@@ -15,7 +15,8 @@ fn main() -> Result<(), anyhow::Error> {
         buffer_size: cpal::BufferSize::Default,
     };
 
-    let buffer = HeapRb::<f32>::new(sample_rate.0 as usize / 20);
+    let buffer_frames = (sample_rate.0 as f32 * 0.03) as usize;
+    let buffer = HeapRb::<f32>::new(buffer_frames);
     let (mut producer, mut consumer) = buffer.split();
 
     let error_callback = |err| eprintln!("streaming error: {}", err);
@@ -24,6 +25,9 @@ fn main() -> Result<(), anyhow::Error> {
         &input_cfg.config(),
         move |data: &[f32], _| {
             for &sample in data {
+                if producer.is_full() {
+                    eprintln!("Buffer overflow");
+                }
                 let _ = producer.try_push(sample);
             }
         },
@@ -35,6 +39,9 @@ fn main() -> Result<(), anyhow::Error> {
         &output_cfg,
         move |data: &mut [f32], _| {
             for sample in data.iter_mut() {
+                if consumer.is_empty() {
+                    eprintln!("Buffer underflow");
+                }
                 *sample = consumer.try_pop().unwrap_or(0.0);
             }
         },
